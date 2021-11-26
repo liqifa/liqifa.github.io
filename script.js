@@ -1,402 +1,298 @@
-var w = c.width = window.innerWidth,
-		h = c.height = window.innerHeight,
-		ctx = c.getContext( '2d' ),
-		
-		hw = w / 2, // half-width
-		hh = h / 2,
-		
-		opts = {
-			strings: [ 'HAPPY', 'BIRTHDAY!','陈淑敏' ],
-			charSize: 30,
-			charSpacing: 35,
-			lineHeight: 40,
-			
-			cx: w / 2,
-			cy: h / 2,
-			
-			fireworkPrevPoints: 10,
-			fireworkBaseLineWidth: 5,
-			fireworkAddedLineWidth: 8,
-			fireworkSpawnTime: 200,
-			fireworkBaseReachTime: 30,
-			fireworkAddedReachTime: 30,
-			fireworkCircleBaseSize: 20,
-			fireworkCircleAddedSize: 10,
-			fireworkCircleBaseTime: 30,
-			fireworkCircleAddedTime: 30,
-			fireworkCircleFadeBaseTime: 10,
-			fireworkCircleFadeAddedTime: 5,
-			fireworkBaseShards: 5,
-			fireworkAddedShards: 5,
-			fireworkShardPrevPoints: 3,
-			fireworkShardBaseVel: 4,
-			fireworkShardAddedVel: 2,
-			fireworkShardBaseSize: 3,
-			fireworkShardAddedSize: 3,
-			gravity: .1,
-			upFlow: -.1,
-			letterContemplatingWaitTime: 360,
-			balloonSpawnTime: 20,
-			balloonBaseInflateTime: 10,
-			balloonAddedInflateTime: 10,
-			balloonBaseSize: 20,
-			balloonAddedSize: 20,
-			balloonBaseVel: .4,
-			balloonAddedVel: .4,
-			balloonBaseRadian: -( Math.PI / 2 - .5 ),
-			balloonAddedRadian: -1,
-		},
-		calc = {
-			totalWidth: opts.charSpacing * Math.max( opts.strings[0].length, opts.strings[1].length )
-		},
-		
-		Tau = Math.PI * 2,
-		TauQuarter = Tau / 4,
-		
-		letters = [];
-
-ctx.font = opts.charSize + 'px Verdana';
-
-function Letter( char, x, y ){
-	this.char = char;
-	this.x = x;
-	this.y = y;
-	
-	this.dx = -ctx.measureText( char ).width / 2;
-	this.dy = +opts.charSize / 2;
-	
-	this.fireworkDy = this.y - hh;
-	
-	var hue = x / calc.totalWidth * 360;
-	
-	this.color = 'hsl(hue,80%,50%)'.replace( 'hue', hue );
-	this.lightAlphaColor = 'hsla(hue,80%,light%,alp)'.replace( 'hue', hue );
-	this.lightColor = 'hsl(hue,80%,light%)'.replace( 'hue', hue );
-	this.alphaColor = 'hsla(hue,80%,50%,alp)'.replace( 'hue', hue );
-	
-	this.reset();
+"use strict";
+console.clear();
+class Stage {
+    constructor() {
+        // container
+        this.render = function () {
+            this.renderer.render(this.scene, this.camera);
+        };
+        this.add = function (elem) {
+            this.scene.add(elem);
+        };
+        this.remove = function (elem) {
+            this.scene.remove(elem);
+        };
+        this.container = document.getElementById('game');
+        // renderer
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: false
+        });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setClearColor('#D0CBC7', 1);
+        this.container.appendChild(this.renderer.domElement);
+        // scene
+        this.scene = new THREE.Scene();
+        // camera
+        let aspect = window.innerWidth / window.innerHeight;
+        let d = 20;
+        this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, -100, 1000);
+        this.camera.position.x = 2;
+        this.camera.position.y = 2;
+        this.camera.position.z = 2;
+        this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+        //light
+        this.light = new THREE.DirectionalLight(0xffffff, 0.5);
+        this.light.position.set(0, 499, 0);
+        this.scene.add(this.light);
+        this.softLight = new THREE.AmbientLight(0xffffff, 0.4);
+        this.scene.add(this.softLight);
+        window.addEventListener('resize', () => this.onResize());
+        this.onResize();
+    }
+    setCamera(y, speed = 0.3) {
+        TweenLite.to(this.camera.position, speed, { y: y + 4, ease: Power1.easeInOut });
+        TweenLite.to(this.camera.lookAt, speed, { y: y, ease: Power1.easeInOut });
+    }
+    onResize() {
+        let viewSize = 30;
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.camera.left = window.innerWidth / -viewSize;
+        this.camera.right = window.innerWidth / viewSize;
+        this.camera.top = window.innerHeight / viewSize;
+        this.camera.bottom = window.innerHeight / -viewSize;
+        this.camera.updateProjectionMatrix();
+    }
 }
-Letter.prototype.reset = function(){
-	
-	this.phase = 'firework';
-	this.tick = 0;
-	this.spawned = false;
-	this.spawningTime = opts.fireworkSpawnTime * Math.random() |0;
-	this.reachTime = opts.fireworkBaseReachTime + opts.fireworkAddedReachTime * Math.random() |0;
-	this.lineWidth = opts.fireworkBaseLineWidth + opts.fireworkAddedLineWidth * Math.random();
-	this.prevPoints = [ [ 0, hh, 0 ] ];
+class Block {
+    constructor(block) {
+        // set size and position
+        this.STATES = { ACTIVE: 'active', STOPPED: 'stopped', MISSED: 'missed' };
+        this.MOVE_AMOUNT = 12;
+        this.dimension = { width: 0, height: 0, depth: 0 };
+        this.position = { x: 0, y: 0, z: 0 };
+        this.targetBlock = block;
+        this.index = (this.targetBlock ? this.targetBlock.index : 0) + 1;
+        this.workingPlane = this.index % 2 ? 'x' : 'z';
+        this.workingDimension = this.index % 2 ? 'width' : 'depth';
+        // set the dimensions from the target block, or defaults.
+        this.dimension.width = this.targetBlock ? this.targetBlock.dimension.width : 10;
+        this.dimension.height = this.targetBlock ? this.targetBlock.dimension.height : 2;
+        this.dimension.depth = this.targetBlock ? this.targetBlock.dimension.depth : 10;
+        this.position.x = this.targetBlock ? this.targetBlock.position.x : 0;
+        this.position.y = this.dimension.height * this.index;
+        this.position.z = this.targetBlock ? this.targetBlock.position.z : 0;
+        this.colorOffset = this.targetBlock ? this.targetBlock.colorOffset : Math.round(Math.random() * 100);
+        // set color
+        if (!this.targetBlock) {
+            this.color = 0x333344;
+        }
+        else {
+            let offset = this.index + this.colorOffset;
+            var r = Math.sin(0.3 * offset) * 55 + 200;
+            var g = Math.sin(0.3 * offset + 2) * 55 + 200;
+            var b = Math.sin(0.3 * offset + 4) * 55 + 200;
+            this.color = new THREE.Color(r / 255, g / 255, b / 255);
+        }
+        // state
+        this.state = this.index > 1 ? this.STATES.ACTIVE : this.STATES.STOPPED;
+        // set direction
+        this.speed = -0.1 - (this.index * 0.005);
+        if (this.speed < -4)
+            this.speed = -4;
+        this.direction = this.speed;
+        // create block
+        let geometry = new THREE.BoxGeometry(this.dimension.width, this.dimension.height, this.dimension.depth);
+        geometry.applyMatrix(new THREE.Matrix4().makeTranslation(this.dimension.width / 2, this.dimension.height / 2, this.dimension.depth / 2));
+        this.material = new THREE.MeshToonMaterial({ color: this.color, shading: THREE.FlatShading });
+        this.mesh = new THREE.Mesh(geometry, this.material);
+        this.mesh.position.set(this.position.x, this.position.y + (this.state == this.STATES.ACTIVE ? 0 : 0), this.position.z);
+        if (this.state == this.STATES.ACTIVE) {
+            this.position[this.workingPlane] = Math.random() > 0.5 ? -this.MOVE_AMOUNT : this.MOVE_AMOUNT;
+        }
+    }
+    reverseDirection() {
+        this.direction = this.direction > 0 ? this.speed : Math.abs(this.speed);
+    }
+    place() {
+        this.state = this.STATES.STOPPED;
+        let overlap = this.targetBlock.dimension[this.workingDimension] - Math.abs(this.position[this.workingPlane] - this.targetBlock.position[this.workingPlane]);
+        let blocksToReturn = {
+            plane: this.workingPlane,
+            direction: this.direction
+        };
+        if (this.dimension[this.workingDimension] - overlap < 0.3) {
+            overlap = this.dimension[this.workingDimension];
+            blocksToReturn.bonus = true;
+            this.position.x = this.targetBlock.position.x;
+            this.position.z = this.targetBlock.position.z;
+            this.dimension.width = this.targetBlock.dimension.width;
+            this.dimension.depth = this.targetBlock.dimension.depth;
+        }
+        if (overlap > 0) {
+            let choppedDimensions = { width: this.dimension.width, height: this.dimension.height, depth: this.dimension.depth };
+            choppedDimensions[this.workingDimension] -= overlap;
+            this.dimension[this.workingDimension] = overlap;
+            let placedGeometry = new THREE.BoxGeometry(this.dimension.width, this.dimension.height, this.dimension.depth);
+            placedGeometry.applyMatrix(new THREE.Matrix4().makeTranslation(this.dimension.width / 2, this.dimension.height / 2, this.dimension.depth / 2));
+            let placedMesh = new THREE.Mesh(placedGeometry, this.material);
+            let choppedGeometry = new THREE.BoxGeometry(choppedDimensions.width, choppedDimensions.height, choppedDimensions.depth);
+            choppedGeometry.applyMatrix(new THREE.Matrix4().makeTranslation(choppedDimensions.width / 2, choppedDimensions.height / 2, choppedDimensions.depth / 2));
+            let choppedMesh = new THREE.Mesh(choppedGeometry, this.material);
+            let choppedPosition = {
+                x: this.position.x,
+                y: this.position.y,
+                z: this.position.z
+            };
+            if (this.position[this.workingPlane] < this.targetBlock.position[this.workingPlane]) {
+                this.position[this.workingPlane] = this.targetBlock.position[this.workingPlane];
+            }
+            else {
+                choppedPosition[this.workingPlane] += overlap;
+            }
+            placedMesh.position.set(this.position.x, this.position.y, this.position.z);
+            choppedMesh.position.set(choppedPosition.x, choppedPosition.y, choppedPosition.z);
+            blocksToReturn.placed = placedMesh;
+            if (!blocksToReturn.bonus)
+                blocksToReturn.chopped = choppedMesh;
+        }
+        else {
+            this.state = this.STATES.MISSED;
+        }
+        this.dimension[this.workingDimension] = overlap;
+        return blocksToReturn;
+    }
+    tick() {
+        if (this.state == this.STATES.ACTIVE) {
+            let value = this.position[this.workingPlane];
+            if (value > this.MOVE_AMOUNT || value < -this.MOVE_AMOUNT)
+                this.reverseDirection();
+            this.position[this.workingPlane] += this.direction;
+            this.mesh.position[this.workingPlane] = this.position[this.workingPlane];
+        }
+    }
 }
-Letter.prototype.step = function(){
-	
-	if( this.phase === 'firework' ){
-		
-		if( !this.spawned ){
-			
-			++this.tick;
-			if( this.tick >= this.spawningTime ){
-				
-				this.tick = 0;
-				this.spawned = true;
-			}
-			
-		} else {
-			
-			++this.tick;
-			
-			var linearProportion = this.tick / this.reachTime,
-					armonicProportion = Math.sin( linearProportion * TauQuarter ),
-					
-					x = linearProportion * this.x,
-					y = hh + armonicProportion * this.fireworkDy;
-			
-			if( this.prevPoints.length > opts.fireworkPrevPoints )
-				this.prevPoints.shift();
-			
-			this.prevPoints.push( [ x, y, linearProportion * this.lineWidth ] );
-			
-			var lineWidthProportion = 1 / ( this.prevPoints.length - 1 );
-			
-			for( var i = 1; i < this.prevPoints.length; ++i ){
-				
-				var point = this.prevPoints[ i ],
-						point2 = this.prevPoints[ i - 1 ];
-					
-				ctx.strokeStyle = this.alphaColor.replace( 'alp', i / this.prevPoints.length );
-				ctx.lineWidth = point[ 2 ] * lineWidthProportion * i;
-				ctx.beginPath();
-				ctx.moveTo( point[ 0 ], point[ 1 ] );
-				ctx.lineTo( point2[ 0 ], point2[ 1 ] );
-				ctx.stroke();
-			
-			}
-			
-			if( this.tick >= this.reachTime ){
-				
-				this.phase = 'contemplate';
-				
-				this.circleFinalSize = opts.fireworkCircleBaseSize + opts.fireworkCircleAddedSize * Math.random();
-				this.circleCompleteTime = opts.fireworkCircleBaseTime + opts.fireworkCircleAddedTime * Math.random() |0;
-				this.circleCreating = true;
-				this.circleFading = false;
-				
-				this.circleFadeTime = opts.fireworkCircleFadeBaseTime + opts.fireworkCircleFadeAddedTime * Math.random() |0;
-				this.tick = 0;
-				this.tick2 = 0;
-				
-				this.shards = [];
-				
-				var shardCount = opts.fireworkBaseShards + opts.fireworkAddedShards * Math.random() |0,
-						angle = Tau / shardCount,
-						cos = Math.cos( angle ),
-						sin = Math.sin( angle ),
-						
-						x = 1,
-						y = 0;
-				
-				for( var i = 0; i < shardCount; ++i ){
-					var x1 = x;
-					x = x * cos - y * sin;
-					y = y * cos + x1 * sin;
-					
-					this.shards.push( new Shard( this.x, this.y, x, y, this.alphaColor ) );
-				}
-			}
-			
-		}
-	} else if( this.phase === 'contemplate' ){
-		
-		++this.tick;
-		
-		if( this.circleCreating ){
-			
-			++this.tick2;
-			var proportion = this.tick2 / this.circleCompleteTime,
-					armonic = -Math.cos( proportion * Math.PI ) / 2 + .5;
-			
-			ctx.beginPath();
-			ctx.fillStyle = this.lightAlphaColor.replace( 'light', 50 + 50 * proportion ).replace( 'alp', proportion );
-			ctx.beginPath();
-			ctx.arc( this.x, this.y, armonic * this.circleFinalSize, 0, Tau );
-			ctx.fill();
-			
-			if( this.tick2 > this.circleCompleteTime ){
-				this.tick2 = 0;
-				this.circleCreating = false;
-				this.circleFading = true;
-			}
-		} else if( this.circleFading ){
-		
-			ctx.fillStyle = this.lightColor.replace( 'light', 70 );
-			ctx.fillText( this.char, this.x + this.dx, this.y + this.dy );
-			
-			++this.tick2;
-			var proportion = this.tick2 / this.circleFadeTime,
-					armonic = -Math.cos( proportion * Math.PI ) / 2 + .5;
-			
-			ctx.beginPath();
-			ctx.fillStyle = this.lightAlphaColor.replace( 'light', 100 ).replace( 'alp', 1 - armonic );
-			ctx.arc( this.x, this.y, this.circleFinalSize, 0, Tau );
-			ctx.fill();
-			
-			if( this.tick2 >= this.circleFadeTime )
-				this.circleFading = false;
-			
-		} else {
-			
-			ctx.fillStyle = this.lightColor.replace( 'light', 70 );
-			ctx.fillText( this.char, this.x + this.dx, this.y + this.dy );
-		}
-		
-		for( var i = 0; i < this.shards.length; ++i ){
-			
-			this.shards[ i ].step();
-			
-			if( !this.shards[ i ].alive ){
-				this.shards.splice( i, 1 );
-				--i;
-			}
-		}
-		
-		if( this.tick > opts.letterContemplatingWaitTime ){
-			
-			this.phase = 'balloon';
-			
-			this.tick = 0;
-			this.spawning = true;
-			this.spawnTime = opts.balloonSpawnTime * Math.random() |0;
-			this.inflating = false;
-			this.inflateTime = opts.balloonBaseInflateTime + opts.balloonAddedInflateTime * Math.random() |0;
-			this.size = opts.balloonBaseSize + opts.balloonAddedSize * Math.random() |0;
-			
-			var rad = opts.balloonBaseRadian + opts.balloonAddedRadian * Math.random(),
-					vel = opts.balloonBaseVel + opts.balloonAddedVel * Math.random();
-			
-			this.vx = Math.cos( rad ) * vel;
-			this.vy = Math.sin( rad ) * vel;
-		}
-	} else if( this.phase === 'balloon' ){
-			
-		ctx.strokeStyle = this.lightColor.replace( 'light', 80 );
-		
-		if( this.spawning ){
-			
-			++this.tick;
-			ctx.fillStyle = this.lightColor.replace( 'light', 70 );
-			ctx.fillText( this.char, this.x + this.dx, this.y + this.dy );
-			
-			if( this.tick >= this.spawnTime ){
-				this.tick = 0;
-				this.spawning = false;
-				this.inflating = true;	
-			}
-		} else if( this.inflating ){
-			
-			++this.tick;
-			
-			var proportion = this.tick / this.inflateTime,
-			    x = this.cx = this.x,
-					y = this.cy = this.y - this.size * proportion;
-			
-			ctx.fillStyle = this.alphaColor.replace( 'alp', proportion );
-			ctx.beginPath();
-			generateBalloonPath( x, y, this.size * proportion );
-			ctx.fill();
-			
-			ctx.beginPath();
-			ctx.moveTo( x, y );
-			ctx.lineTo( x, this.y );
-			ctx.stroke();
-			
-			ctx.fillStyle = this.lightColor.replace( 'light', 70 );
-			ctx.fillText( this.char, this.x + this.dx, this.y + this.dy );
-			
-			if( this.tick >= this.inflateTime ){
-				this.tick = 0;
-				this.inflating = false;
-			}
-			
-		} else {
-			
-			this.cx += this.vx;
-			this.cy += this.vy += opts.upFlow;
-			
-			ctx.fillStyle = this.color;
-			ctx.beginPath();
-			generateBalloonPath( this.cx, this.cy, this.size );
-			ctx.fill();
-			
-			ctx.beginPath();
-			ctx.moveTo( this.cx, this.cy );
-			ctx.lineTo( this.cx, this.cy + this.size );
-			ctx.stroke();
-			
-			ctx.fillStyle = this.lightColor.replace( 'light', 70 );
-			ctx.fillText( this.char, this.cx + this.dx, this.cy + this.dy + this.size );
-			
-			if( this.cy + this.size < -hh || this.cx < -hw || this.cy > hw  )
-				this.phase = 'done';
-			
-		}
-	}
+class Game {
+    constructor() {
+        this.STATES = {
+            'LOADING': 'loading',
+            'PLAYING': 'playing',
+            'READY': 'ready',
+            'ENDED': 'ended',
+            'RESETTING': 'resetting'
+        };
+        this.blocks = [];
+        this.state = this.STATES.LOADING;
+        this.stage = new Stage();
+        this.mainContainer = document.getElementById('container');
+        this.scoreContainer = document.getElementById('score');
+        this.startButton = document.getElementById('start-button');
+        this.instructions = document.getElementById('instructions');
+        this.scoreContainer.innerHTML = '0';
+        this.newBlocks = new THREE.Group();
+        this.placedBlocks = new THREE.Group();
+        this.choppedBlocks = new THREE.Group();
+        this.stage.add(this.newBlocks);
+        this.stage.add(this.placedBlocks);
+        this.stage.add(this.choppedBlocks);
+        this.addBlock();
+        this.tick();
+        this.updateState(this.STATES.READY);
+        document.addEventListener('keydown', e => {
+            if (e.keyCode == 32)
+                this.onAction();
+        });
+        document.addEventListener('click', e => {
+            this.onAction();
+        });
+        document.addEventListener('touchstart', e => {
+            e.preventDefault();
+            // this.onAction();
+            // ☝️ this triggers after click on android so you
+            // insta-lose, will figure it out later.
+        });
+    }
+    updateState(newState) {
+        for (let key in this.STATES)
+            this.mainContainer.classList.remove(this.STATES[key]);
+        this.mainContainer.classList.add(newState);
+        this.state = newState;
+    }
+    onAction() {
+        switch (this.state) {
+            case this.STATES.READY:
+                this.startGame();
+                break;
+            case this.STATES.PLAYING:
+                this.placeBlock();
+                break;
+            case this.STATES.ENDED:
+                this.restartGame();
+                break;
+        }
+    }
+    startGame() {
+        if (this.state != this.STATES.PLAYING) {
+            this.scoreContainer.innerHTML = '0';
+            this.updateState(this.STATES.PLAYING);
+            this.addBlock();
+        }
+    }
+    restartGame() {
+        this.updateState(this.STATES.RESETTING);
+        let oldBlocks = this.placedBlocks.children;
+        let removeSpeed = 0.2;
+        let delayAmount = 0.02;
+        for (let i = 0; i < oldBlocks.length; i++) {
+            TweenLite.to(oldBlocks[i].scale, removeSpeed, { x: 0, y: 0, z: 0, delay: (oldBlocks.length - i) * delayAmount, ease: Power1.easeIn, onComplete: () => this.placedBlocks.remove(oldBlocks[i]) });
+            TweenLite.to(oldBlocks[i].rotation, removeSpeed, { y: 0.5, delay: (oldBlocks.length - i) * delayAmount, ease: Power1.easeIn });
+        }
+        let cameraMoveSpeed = removeSpeed * 2 + (oldBlocks.length * delayAmount);
+        this.stage.setCamera(2, cameraMoveSpeed);
+        let countdown = { value: this.blocks.length - 1 };
+        TweenLite.to(countdown, cameraMoveSpeed, { value: 0, onUpdate: () => { this.scoreContainer.innerHTML = String(Math.round(countdown.value)); } });
+        this.blocks = this.blocks.slice(0, 1);
+        setTimeout(() => {
+            this.startGame();
+        }, cameraMoveSpeed * 1000);
+    }
+    placeBlock() {
+        let currentBlock = this.blocks[this.blocks.length - 1];
+        let newBlocks = currentBlock.place();
+        this.newBlocks.remove(currentBlock.mesh);
+        if (newBlocks.placed)
+            this.placedBlocks.add(newBlocks.placed);
+        if (newBlocks.chopped) {
+            this.choppedBlocks.add(newBlocks.chopped);
+            let positionParams = { y: '-=30', ease: Power1.easeIn, onComplete: () => this.choppedBlocks.remove(newBlocks.chopped) };
+            let rotateRandomness = 10;
+            let rotationParams = {
+                delay: 0.05,
+                x: newBlocks.plane == 'z' ? ((Math.random() * rotateRandomness) - (rotateRandomness / 2)) : 0.1,
+                z: newBlocks.plane == 'x' ? ((Math.random() * rotateRandomness) - (rotateRandomness / 2)) : 0.1,
+                y: Math.random() * 0.1,
+            };
+            if (newBlocks.chopped.position[newBlocks.plane] > newBlocks.placed.position[newBlocks.plane]) {
+                positionParams[newBlocks.plane] = '+=' + (40 * Math.abs(newBlocks.direction));
+            }
+            else {
+                positionParams[newBlocks.plane] = '-=' + (40 * Math.abs(newBlocks.direction));
+            }
+            TweenLite.to(newBlocks.chopped.position, 1, positionParams);
+            TweenLite.to(newBlocks.chopped.rotation, 1, rotationParams);
+        }
+        this.addBlock();
+    }
+    addBlock() {
+        let lastBlock = this.blocks[this.blocks.length - 1];
+        if (lastBlock && lastBlock.state == lastBlock.STATES.MISSED) {
+            return this.endGame();
+        }
+        this.scoreContainer.innerHTML = String(this.blocks.length - 1);
+        let newKidOnTheBlock = new Block(lastBlock);
+        this.newBlocks.add(newKidOnTheBlock.mesh);
+        this.blocks.push(newKidOnTheBlock);
+        this.stage.setCamera(this.blocks.length * 2);
+        if (this.blocks.length >= 5)
+            this.instructions.classList.add('hide');
+    }
+    endGame() {
+        this.updateState(this.STATES.ENDED);
+    }
+    tick() {
+        this.blocks[this.blocks.length - 1].tick();
+        this.stage.render();
+        requestAnimationFrame(() => { this.tick(); });
+    }
 }
-function Shard( x, y, vx, vy, color ){
-	
-	var vel = opts.fireworkShardBaseVel + opts.fireworkShardAddedVel * Math.random();
-	
-	this.vx = vx * vel;
-	this.vy = vy * vel;
-	
-	this.x = x;
-	this.y = y;
-	
-	this.prevPoints = [ [ x, y ] ];
-	this.color = color;
-	
-	this.alive = true;
-	
-	this.size = opts.fireworkShardBaseSize + opts.fireworkShardAddedSize * Math.random();
-}
-Shard.prototype.step = function(){
-	
-	this.x += this.vx;
-	this.y += this.vy += opts.gravity;
-	
-	if( this.prevPoints.length > opts.fireworkShardPrevPoints )
-		this.prevPoints.shift();
-	
-	this.prevPoints.push( [ this.x, this.y ] );
-	
-	var lineWidthProportion = this.size / this.prevPoints.length;
-	
-	for( var k = 0; k < this.prevPoints.length - 1; ++k ){
-		
-		var point = this.prevPoints[ k ],
-				point2 = this.prevPoints[ k + 1 ];
-		
-		ctx.strokeStyle = this.color.replace( 'alp', k / this.prevPoints.length );
-		ctx.lineWidth = k * lineWidthProportion;
-		ctx.beginPath();
-		ctx.moveTo( point[ 0 ], point[ 1 ] );
-		ctx.lineTo( point2[ 0 ], point2[ 1 ] );
-		ctx.stroke();
-		
-	}
-	
-	if( this.prevPoints[ 0 ][ 1 ] > hh )
-		this.alive = false;
-}
-function generateBalloonPath( x, y, size ){
-	
-	ctx.moveTo( x, y );
-	ctx.bezierCurveTo( x - size / 2, y - size / 2,
-									 	 x - size / 4, y - size,
-									   x,            y - size );
-	ctx.bezierCurveTo( x + size / 4, y - size,
-									   x + size / 2, y - size / 2,
-									   x,            y );
-}
-
-function anim(){
-	
-	window.requestAnimationFrame( anim );
-	
-	ctx.fillStyle = '#111';
-	ctx.fillRect( 0, 0, w, h );
-	
-	ctx.translate( hw, hh );
-	
-	var done = true;
-	for( var l = 0; l < letters.length; ++l ){
-		
-		letters[ l ].step();
-		if( letters[ l ].phase !== 'done' )
-			done = false;
-	}
-	
-	ctx.translate( -hw, -hh );
-	
-	if( done )
-		for( var l = 0; l < letters.length; ++l )
-			letters[ l ].reset();
-}
-
-for( var i = 0; i < opts.strings.length; ++i ){
-	for( var j = 0; j < opts.strings[ i ].length; ++j ){
-		letters.push( new Letter( opts.strings[ i ][ j ], 
-														j * opts.charSpacing + opts.charSpacing / 2 - opts.strings[ i ].length * opts.charSize / 2,
-														i * opts.lineHeight + opts.lineHeight / 2 - opts.strings.length * opts.lineHeight / 2 ) );
-	}
-}
-
-anim();
-
-window.addEventListener( 'resize', function(){
-	
-	w = c.width = window.innerWidth;
-	h = c.height = window.innerHeight;
-	
-	hw = w / 2;
-	hh = h / 2;
-	
-	ctx.font = opts.charSize + 'px Verdana';
-})
+let game = new Game();
